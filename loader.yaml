@@ -1,0 +1,75 @@
+provider "aws" {
+  region = "eu-west-2"
+}
+
+# IAM Role for Lambda Execution
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "lambda_execution_role"
+  assume_role_policy = jsonencode({
+    Version   = "2024-03-06",
+    Statement = [{
+      Effect    = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      },
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# S3 Bucket: weather_landing
+resource "aws_s3_bucket" "weather_landing" {
+  bucket = "weather-landing-bucket"
+  acl    = "private"
+
+  event_notification {
+    lambda_function {
+      lambda_function_arn = aws_lambda_function.weather_retrieve.arn
+      events              = ["s3:ObjectCreated:*"]
+    }
+  }
+}
+# S3 Bucket: weather_transformed
+resource "aws_s3_bucket" "weather_transformed" {
+  bucket = "weather-transformed-bucket"
+  acl    = "private"
+}
+
+# EventBridge Rule: weather_trigger
+resource "aws_cloudwatch_event_rule" "weather_trigger" {
+  name                = "weather_trigger"
+  description         = "Trigger weather ETL pipeline"
+  schedule_expression = "cron(0 5 ? * MON-FRI *)"  
+}
+
+# IAM Policy for Lambda Execution Role
+data "aws_iam_policy_document" "lambda_execution_policy_document" {
+  statement {
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+
+  statement {
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.weather_landing.arn,
+      aws_s3_bucket.weather_transformed.arn
+    ]
+  }
+}
+
+# Lambda Function: weather_retrieve
+resource "aws_lambda_function" "weather_retrieve" {
+  function_name    = "weather_retrieve"
+  handler          = "index.handler"
+  runtime          = "nodejs14.x"
+  memory_size      = 512
+  timeout          = 300
+  role             = aws_iam_role.lambda_execution_role.arn
+  filename         = "path/to/weather_retrieve.zip"
+}
+
